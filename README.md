@@ -6,4 +6,4 @@
 
 
 # Wiki
-В Wiki репозитория находятся схемы соединения, перечень компонентов, 3D модели, etc.
+В [Wiki](https://github.com/333brain333/turtlebot/wikihttps://github.com/333brain333/turtlebot/wiki) репозитория находятся схемы соединения, перечень компонентов, 3D модели, etc.
