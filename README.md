@@ -1,6 +1,6 @@
 # Turtlebot
 
-<img src="pics/robot_front.jpg" width="400" alt="Robot front view" />
+<img src="pics/v2_case/robot_front.jpg" width="400" alt="Robot front view" />
 
 Разработка 2х колёсного робота по типу turtlebot. [В рамках курса ROS2 — Введение в робототехнику](https://stepik.org/course/221157/promo#toc)  
 
