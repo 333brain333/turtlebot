@@ -1,6 +1,8 @@
 # Turtlebot
 
-<img src="pics/v2_case/robot_front.jpg" width="400" alt="Robot front view" />
+|**Общий вид**|**Внутри робота**|**Вид снизу**|
+|------------------------------------------|-----------------------------|-----------------------------|
+|<a href="https://raw.githubusercontent.com/333brain333/turtlebot/refs/heads/main/pics/v2_case/front_scheme.png"><img src="https://github.com/333brain333/turtlebot/blob/main/pics/v2_case/front_scheme.png" width="400" alt="Robot front view" /></a>|<a href="https://raw.githubusercontent.com/333brain333/turtlebot/refs/heads/main/pics/v2_case/inside_scheme.png"><img src="https://github.com/333brain333/turtlebot/blob/main/pics/v2_case/inside_scheme.png" width="400" alt="Robot front view" /></a>|<a href="https://raw.githubusercontent.com/333brain333/turtlebot/refs/heads/main/pics/v2_case/bot_scheme.png"><img src="https://github.com/333brain333/turtlebot/blob/main/pics/v2_case/bot_scheme.png" width="400" alt="Robot front view" /></a>|
 
 Разработка 2х колёсного робота по типу turtlebot. [В рамках курса ROS2 — Введение в робототехнику](https://stepik.org/course/221157/promo#toc)  
 
