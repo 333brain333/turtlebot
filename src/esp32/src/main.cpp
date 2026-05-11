@@ -1,11 +1,19 @@
 #include <Arduino.h>
+#include "main.h"
+#include <FastLED.h>
+
+#define LED_STRIP_PIN 13       // Пин подключения ленты к ESP32
+#define NUM_LEDS    32          // Количество светодиодов в ленте
+#define BRIGHTNESS  255          // Яркость (0-255)
+#define LED_TYPE    WS2812B     // Тип светодиодной ленты
+#define COLOR_ORDER GRB         // Порядок цветов (для WS2812B обычно GRB)
 
 #define LEFT_MOTOR_A 14     // Цифровой выход (левый мотор). Если 0 - едем вперед
 #define LEFT_MOTOR_B 27     // Цифровой выход (левый мотор). Если 0 - едем назад
 #define RIGHT_MOTOR_A 25    // Цифровой выход (правый мотор). Если 0 - едем вперед
 #define RIGHT_MOTOR_B 26    // Цифровой выход (правый мотор). Если 0 - едем назад
 
-#define LED_PIN 2           // Встроенный светодиод на ESP32 Dev Board
+#define LED_BUILTIN_PIN 2       // Встроенный светодиод на ESP32 Dev Board
 
 #define LEFT_ENCODER_A 33    // Цифровой вход, канал A энкодера левого колеса
 #define LEFT_ENCODER_B 32    // Цифровой вход, канал B энкодера левого колеса 
@@ -24,7 +32,9 @@
 volatile long left_encoder_value = 0; 
 volatile long right_encoder_value = 0;
 
-// Переменные для харения состоания скорости колёс и одометрии
+/**
+ * Переменные для харения состоания скорости колёс и одометрии
+ */
 long last_left_encoder = 0;
 long last_right_encoder = 0;
 
@@ -32,6 +42,8 @@ long last_speed_left_encoder = 0, last_speed_right_encoder = 0;
 float leftWheelSpeed = 0.0, rightWheelSpeed = 0.0;
 float vlSpeedFiltered = 0.0, vrSpeedFiltered = 0.0;
 uint32_t lastTimeL = 0, lastTimeR = 0;
+
+float targetLeftWheelSpeed = 0, targetRightWheelSpeed = 0;
 
 float xPos = 0.0, yPos = 0.0, theta = 0.0;
 
@@ -41,17 +53,18 @@ const float ENCODER_RESOLUTION = 330.0;
 const float TICKS_TO_MM = (PI * WHEEL_DIAMETER) / ENCODER_RESOLUTION;
 const float ALPHA = 0.2; // Коэффициент фильтрации скорости
 
-//  Переменные для настройки моргания светодиодом на плате
+// Глобальные коэффициенты PID – их можно обновлять через UART
+float pidKp = 1.1;
+float pidKi = 1.3;
+float pidKd = 0.01;
+float pidKff = 0.25;
+
+/**
+ * Переменные для настройки моргания светодиодом на плате
+ */
 bool led_state = false;
 unsigned long previous_led_millis = 0;
 const unsigned long LED_BLINK_INTERVAL_MS = 500;
-
-void processCommand(String command);
-bool parseSetPWM(const String& command, int* leftA_PWM, int* leftB_PWM, int* rightA_PWM, int* rightB_PWM);
-void setMotorsPWM(int leftA, int leftB, int rightA, int rightB);
-void updateOdometry();
-void computeSpeed();
-bool parseSetPose(const String& command, float* x, float* y, float* th);
 
 
 /**
@@ -66,10 +79,23 @@ bool parseSetPose(const String& command, float* x, float* y, float* th);
 void left_interrupt() {digitalRead(LEFT_ENCODER_B)?left_encoder_value++:left_encoder_value--;}
 void right_interrupt() {digitalRead(RIGHT_ENCODER_B)?right_encoder_value++:right_encoder_value--;}
 
+/*
+ * Для светодиодной ленты FastLED, мы создаём 
+ * глобальный массив типа CRGB, который будет хранить цвет каждого светодиода.
+*/
+CRGB leds[NUM_LEDS];
+
+
+/**
+ * SETUP
+ */
 void setup() {
   Serial2.begin(JETSON_UART_BAUD, SERIAL_8N1, JETSON_UART_RX, JETSON_UART_TX);
   delay(1000);
   Serial2.println("System started");
+  // Инициализация ленты с указанием пина, типа и массива светодиодов
+  FastLED.addLeds<LED_TYPE, LED_STRIP_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
+  FastLED.setBrightness(BRIGHTNESS);
 
   /**
    * Подключение функций-прерываний (interrupt service routines, ISR) к выводам энкодеров.
@@ -84,7 +110,7 @@ void setup() {
   pinMode(LEFT_MOTOR_B,OUTPUT);
   pinMode(RIGHT_MOTOR_A,OUTPUT);
   pinMode(RIGHT_MOTOR_B,OUTPUT);
-  pinMode(LED_PIN, OUTPUT);
+  pinMode(LED_BUILTIN_PIN, OUTPUT);
   
   // Настройка выводов энкодеров как входы (INPUT).
   pinMode(LEFT_ENCODER_A, INPUT);
@@ -107,25 +133,38 @@ void setup() {
   // analogWrite(RIGHT_MOTOR_B,255);
 }
 
+/**
+ * LOOP
+ */
 void loop() {
+  // Блок для моргания встроенным светодиодом на плате ESP32 каждые 500 мс, чтобы показать, что система работает.
   unsigned long current_millis = millis();
   if (current_millis - previous_led_millis >= LED_BLINK_INTERVAL_MS) {
     previous_led_millis = current_millis;
     led_state = !led_state;
-    digitalWrite(LED_PIN, led_state ? HIGH : LOW);
+    digitalWrite(LED_BUILTIN_PIN, led_state ? HIGH : LOW);
   }
+  // 1. Зажигаем всю ленту белым цветом
+  fill_solid(leds, NUM_LEDS, CRGB::White);
+  FastLED.show();
+
   if (Serial2.available()) {
     String command = Serial2.readStringUntil('\n');
     processCommand(command);
   }
-  computeSpeed();
-  updateOdometry();
+  static uint32_t PIDTimer = 0;
+  if (millis() - PIDTimer > 50) {
+    computeSpeed();
+    updateOdometry();
+    computeWheelsPID();
+    PIDTimer = millis();
+  }
 
   static uint32_t printTimer = 0;
   if (millis() - printTimer > 100){
     Serial2.printf("POS X=%.2f Y=%.2f Th=%.2f ", xPos, yPos, theta);
     Serial2.printf("ENC L=%ld R=%ld ", left_encoder_value, right_encoder_value);
-    Serial2.printf("SPD L=%.2f mm/s R=%.2f mm/s\n", vlSpeedFiltered, vrSpeedFiltered);
+    Serial2.printf("SPD L=%.2f mm/s R=%.2f mm/s\r\n", vlSpeedFiltered, vrSpeedFiltered);
     printTimer = millis();
   }
 }
@@ -146,6 +185,24 @@ void processCommand(String command) {
       yPos = y;
       theta = th;
       Serial2.println("OK: Pose set");
+    }
+  } else if (command.startsWith("SET_WHEELS_SPEED")) {
+    int leftSpeed = 0, rightSpeed = 0;
+    if (parseSetSpeed(command, &leftSpeed, &rightSpeed)) {
+      targetLeftWheelSpeed = leftSpeed;
+      targetRightWheelSpeed = rightSpeed;
+      Serial2.println("OK: Wheel speed set");
+    }
+  } else if (command.startsWith("SET_COEFF")) {
+    float newKp, newKi, newKd, newKff;
+    if (parseSetCoeff(command, &newKp, &newKi, &newKd, &newKff)) {
+      pidKp = newKp;
+      pidKi = newKi;
+      pidKd = newKd;
+      pidKff = newKff;
+      Serial2.println("OK: Coefficients updated");
+    } else {
+      Serial2.println("ERROR: Invalid coefficients");
     }
   } else {
     Serial2.println("ERROR: Unknown command");
@@ -254,4 +311,113 @@ void computeSpeed() {
   } else if (dtR > 0.005 && right_encoder_value == last_speed_right_encoder){
     vrSpeedFiltered = 0;
   }
+}
+
+void computeWheelsPID(){
+  // Ограничение интегральной составляющей (anti-windup)
+  const float integralLimit = 100.0;
+
+  // Статические переменные для состояния PID для каждого колеса
+  static float errorLeftIntegral = 0;
+  static float errorRightIntegral = 0;
+  static float prevErrorLeft = 0;
+  static float prevErrorRight = 0;
+  static uint32_t lastPIDTime = millis();
+  // Для сброса интегральной составляющей при смене целевой скорости
+  static float lastTargetLeft = 0.0;
+  static float lastTargetRight = 0.0;
+
+  // Сброс интеграла, если целевая скорость изменилась
+  if(targetLeftWheelSpeed != lastTargetLeft){
+    errorLeftIntegral = 0;
+    prevErrorLeft = 0;
+    lastTargetLeft = targetLeftWheelSpeed;
+  }
+  if(targetRightWheelSpeed != lastTargetRight){
+    errorRightIntegral = 0;
+    prevErrorRight = 0;
+    lastTargetRight = targetRightWheelSpeed;
+  }
+
+  // Вычисляем интервал dt (в секундах)
+  uint32_t now = millis();
+  float dt = (now - lastPIDTime) / 1000.0f;
+  if(dt < 0.001f) dt = 0.001f;
+  lastPIDTime = now;
+
+  // Расчет ошибок
+  float errorLeft  = targetLeftWheelSpeed  - vlSpeedFiltered;
+  float errorRight = targetRightWheelSpeed - vrSpeedFiltered;
+
+  // Интегральная составляющая
+  errorLeftIntegral  += errorLeft  * dt;
+  errorRightIntegral += errorRight * dt;
+  if(errorLeftIntegral > integralLimit)  errorLeftIntegral  = integralLimit;
+  if(errorLeftIntegral < -integralLimit) errorLeftIntegral  = -integralLimit;
+  if(errorRightIntegral > integralLimit)  errorRightIntegral = integralLimit;
+  if(errorRightIntegral < -integralLimit) errorRightIntegral = -integralLimit;
+
+  // Производная ошибки
+  float derivativeLeft  = (errorLeft  - prevErrorLeft)  / dt;
+  float derivativeRight = (errorRight - prevErrorRight) / dt;
+  prevErrorLeft  = errorLeft;
+  prevErrorRight = errorRight;
+
+  // Вычисление PID-выхода с использованием глобальных коэффициентов
+  float pidLeft  = pidKp * errorLeft  + pidKi * errorLeftIntegral  + pidKd * derivativeLeft;
+  float pidRight = pidKp * errorRight + pidKi * errorRightIntegral + pidKd * derivativeRight;
+
+  // Добавляем feedforward
+  float outputLeft  = pidLeft  + pidKff * targetLeftWheelSpeed;
+  float outputRight = pidRight + pidKff * targetRightWheelSpeed;
+
+  // Преобразование в значения ШИМ
+  int leftA_PWM = 0, leftB_PWM = 0;
+  int rightA_PWM = 0, rightB_PWM = 0;
+
+  if(outputLeft >= 0){
+    leftA_PWM = 0;
+    leftB_PWM = constrain((int)outputLeft, 0, 255);
+  } else {
+    leftA_PWM = constrain((int)(-outputLeft), 0, 255);
+    leftB_PWM = 0;
+  }
+  if(outputRight >= 0){
+    rightA_PWM = 0;
+    rightB_PWM = constrain((int)outputRight, 0, 255);
+  } else {
+    rightA_PWM = constrain((int)(-outputRight), 0, 255);
+    rightB_PWM = 0;
+  }
+
+  setMotorsPWM(leftA_PWM, leftB_PWM, rightA_PWM, rightB_PWM);
+}
+
+// Функция для парсинга команды установки коэффициентов: "SET_COEFF Kp Ki Kd Kff"
+bool parseSetCoeff(const String& command, float* Kp, float* Ki, float* Kd, float* Kff) {
+  int index1 = command.indexOf(' ');
+  if(index1 == -1) return false;
+  int index2 = command.indexOf(' ', index1 + 1);
+  if(index2 == -1) return false;
+  int index3 = command.indexOf(' ', index2 + 1);
+  if(index3 == -1) return false;
+  int index4 = command.indexOf(' ', index3 + 1);
+  if(index4 == -1) return false;
+
+  *Kp = command.substring(index1 + 1, index2).toFloat();
+  *Ki = command.substring(index2 + 1, index3).toFloat();
+  *Kd = command.substring(index3 + 1, index4).toFloat();
+  *Kff = command.substring(index4 + 1).toFloat();
+  return true;
+}
+
+bool parseSetSpeed(const String& command, int* speedLeft, int* speedRight) {
+  int index1 = command.indexOf(' ');
+  if (index1 == -1) return false;
+  int index2 = command.indexOf(' ', index1 + 1);
+  if (index2 == -1) return false;
+
+  *speedLeft = command.substring(index1 + 1, index2).toInt();
+  *speedRight = command.substring(index2 + 1).toInt();
+  return true;
 }
