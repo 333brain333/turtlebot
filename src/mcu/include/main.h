@@ -2,6 +2,7 @@
 #define MAIN_H
 
 #include <Arduino.h>
+#include <FastLED.h>
 
 /**
  * Interrupt handlers for encoders
@@ -35,4 +36,6 @@ void computeSpeed();
 void computeWheelsPID();
 bool parseSetCoeff(const String& command, float* Kp, float* Ki, float* Kd, float* Kff);
 bool parseSetSpeed(const String& command, int* speedLeft, int* speedRight);
+bool parseSetLed(const String& command, int* brightness, String* colorName);
+bool parseColorName(const String& name, CRGB* color);
 #endif // MAIN_H

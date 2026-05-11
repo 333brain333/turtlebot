@@ -84,6 +84,9 @@ void right_interrupt() {digitalRead(RIGHT_ENCODER_B)?right_encoder_value++:right
  * глобальный массив типа CRGB, который будет хранить цвет каждого светодиода.
 */
 CRGB leds[NUM_LEDS];
+uint8_t currentLedBrightness = BRIGHTNESS;
+CRGB currentLedColor = CRGB::White;
+bool ledsNeedUpdate = true;
 
 
 /**
@@ -95,7 +98,9 @@ void setup() {
   Serial2.println("System started");
   // Инициализация ленты с указанием пина, типа и массива светодиодов
   FastLED.addLeds<LED_TYPE, LED_STRIP_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
-  FastLED.setBrightness(BRIGHTNESS);
+  FastLED.setBrightness(currentLedBrightness);
+  fill_solid(leds, NUM_LEDS, currentLedColor);
+  FastLED.show();
 
   /**
    * Подключение функций-прерываний (interrupt service routines, ISR) к выводам энкодеров.
@@ -144,9 +149,12 @@ void loop() {
     led_state = !led_state;
     digitalWrite(LED_BUILTIN_PIN, led_state ? HIGH : LOW);
   }
-  // 1. Зажигаем всю ленту белым цветом
-  fill_solid(leds, NUM_LEDS, CRGB::White);
-  FastLED.show();
+  if (ledsNeedUpdate) {
+    FastLED.setBrightness(currentLedBrightness);
+    fill_solid(leds, NUM_LEDS, currentLedColor);
+    FastLED.show();
+    ledsNeedUpdate = false;
+  }
 
   if (Serial2.available()) {
     String command = Serial2.readStringUntil('\n');
@@ -203,6 +211,22 @@ void processCommand(String command) {
       Serial2.println("OK: Coefficients updated");
     } else {
       Serial2.println("ERROR: Invalid coefficients");
+    }
+  } else if (command.startsWith("SET_LED")) {
+    int brightness = 0;
+    String colorName;
+    if (parseSetLed(command, &brightness, &colorName)) {
+      CRGB parsedColor;
+      if (parseColorName(colorName, &parsedColor)) {
+        currentLedBrightness = constrain(brightness, 0, 255);
+        currentLedColor = parsedColor;
+        ledsNeedUpdate = true;
+        Serial2.println("OK: LED updated");
+      } else {
+        Serial2.println("ERROR: Unknown color");
+      }
+    } else {
+      Serial2.println("ERROR: Invalid SET_LED format");
     }
   } else {
     Serial2.println("ERROR: Unknown command");
@@ -419,5 +443,47 @@ bool parseSetSpeed(const String& command, int* speedLeft, int* speedRight) {
 
   *speedLeft = command.substring(index1 + 1, index2).toInt();
   *speedRight = command.substring(index2 + 1).toInt();
+  return true;
+}
+
+bool parseSetLed(const String& command, int* brightness, String* colorName) {
+  int index1 = command.indexOf(' ');
+  if (index1 == -1) return false;
+  int index2 = command.indexOf(' ', index1 + 1);
+  if (index2 == -1) return false;
+
+  *brightness = command.substring(index1 + 1, index2).toInt();
+  *colorName = command.substring(index2 + 1);
+  colorName->trim();
+  return true;
+}
+
+bool parseColorName(const String& name, CRGB* color) {
+  String lowerName = name;
+  lowerName.toLowerCase();
+
+  if (lowerName == "white") {
+    *color = CRGB::White;
+  } else if (lowerName == "red") {
+    *color = CRGB::Red;
+  } else if (lowerName == "green") {
+    *color = CRGB::Green;
+  } else if (lowerName == "blue") {
+    *color = CRGB::Blue;
+  } else if (lowerName == "yellow") {
+    *color = CRGB::Yellow;
+  } else if (lowerName == "cyan") {
+    *color = CRGB::Cyan;
+  } else if (lowerName == "magenta") {
+    *color = CRGB::Magenta;
+  } else if (lowerName == "orange") {
+    *color = CRGB::Orange;
+  } else if (lowerName == "purple") {
+    *color = CRGB::Purple;
+  } else if (lowerName == "black" || lowerName == "off") {
+    *color = CRGB::Black;
+  } else {
+    return false;
+  }
   return true;
 }
