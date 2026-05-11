@@ -1,0 +1,13 @@
+[Unit]
+Description=Play power-down sound on shutdown
+DefaultDependencies=no
+Before=shutdown.target reboot.target halt.target
+
+[Service]
+Type=oneshot
+User=agrodroid
+ExecStart=/usr/bin/mpv --no-video /home/agrodroid/Music/power_down.m4a
+TimeoutStartSec=15
+
+[Install]
+WantedBy=halt.target reboot.target shutdown.target

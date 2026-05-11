@@ -1,0 +1,12 @@
+[Unit]
+Description=Play power-up sound on boot
+After=sound.target multi-user.target
+
+[Service]
+Type=simple
+User=agrodroid
+ExecStart=/bin/bash -c 'sleep 10 && /usr/bin/mpv --no-video /home/agrodroid/Music/power_up.m4a'
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
