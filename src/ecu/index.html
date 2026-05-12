@@ -421,14 +421,9 @@ header {
 <div id="panel-cam" class="panel">
   <div class="card">
     <div class="card-title">Веб-камера (go2rtc MJPEG)</div>
-    <div class="cam-bar" style="margin-bottom:12px">
-      <input type="text" id="camUrl"
-             value="http://192.168.1.97:1984/stream.html?src=webcam"
-             placeholder="URL потока">
-      <button class="btn-accent" onclick="loadCam()">Применить</button>
-    </div>
     <div class="cam-frame">
-      <iframe id="camFrame" src="" allow="autoplay; camera"></iframe>
+      <img src="/camera" alt="camera stream"
+           style="width:100%;height:100%;object-fit:contain;display:block;">
     </div>
   </div>
 </div>
@@ -496,7 +491,6 @@ function switchTab(name, btn) {
   document.getElementById('panel-' + name).classList.add('active');
   btn.classList.add('active');
   activeTab = name;
-  if (name === 'cam') loadCam();
 }
 
 /* ═══════════════════════════ PID sliders ════════════════════════════════ */
@@ -647,15 +641,7 @@ function handleLine(line) {
 }
 
 /* ═══════════════════════════ Camera ═════════════════════════════════════ */
-let camLoaded = false;
 
-function loadCam() {
-  const url = document.getElementById('camUrl').value.trim();
-  if (url) {
-    document.getElementById('camFrame').src = url;
-    camLoaded = true;
-  }
-}
 
 /* ═══════════════════════════ LED ════════════════════════════════════════ */
 const COLORS = [

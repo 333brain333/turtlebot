@@ -18,9 +18,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          mkdir -p release/music release/services
+          mkdir -p release/bin release/music release/services release/config
+          cp -a bin/. release/bin/
           cp -a music/. release/music/
           cp -a src/ecu/services/. release/services/
+          cp -a config/. release/config/
+          cp -a src/ecu/main.py release/main.py
+          cp -a src/ecu/index.html release/index.html
 
       - name: Set artifact name
         run: |

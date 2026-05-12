@@ -1,0 +1,13 @@
+[Unit]
+Description=Start go2rtc server
+After=tb_on_powerup.service
+Requires=tb_on_powerup.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/agrodroid/releases/active_release
+ExecStart=/bin/sh -c 'exec ./bin/go2rtc_linux_arm64 -config ./config/go2rtc.yaml'
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
