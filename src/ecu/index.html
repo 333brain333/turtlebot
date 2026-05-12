@@ -182,6 +182,8 @@ header {
   color: var(--muted);
   transition: background .1s, color .1s, border-color .1s;
   user-select: none;
+  cursor: pointer;
+  touch-action: manipulation;
 }
 .key-cap.lit { background: var(--accent); border-color: var(--accent); color: #fff; }
 .keys-desc {
@@ -295,21 +297,6 @@ header {
 .col-btn.dark { color: rgba(0,0,0,.6); }
 .col-btn:hover { transform: scale(1.06); }
 .col-btn.sel { border-color: #fff; transform: scale(1.06); }
-.led-actions { display: flex; gap: 8px; }
-.btn-off {
-  padding: 9px 16px;
-  border: 1px solid var(--border2);
-  background: transparent;
-  color: var(--muted);
-  border-radius: 8px;
-  font-family: 'Syne', sans-serif;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: border-color .2s, color .2s;
-}
-.btn-off:hover { border-color: var(--red); color: var(--red); }
-
 /* ── Scrollbar ────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
@@ -397,7 +384,7 @@ header {
         <div class="keys-desc">Стрелки: ±50 мм/с · работают на этой вкладке</div>
       </div>
 
-      <button class="stop-btn" onclick="stopWheels()">⏹ СТОП</button>
+      <button class="stop-btn" id="stopBtn" onclick="stopWheels()">⏹ СТОП</button>
     </div>
   </div>
 
@@ -447,10 +434,6 @@ header {
     <!-- color palette -->
     <div class="color-grid" id="colorGrid"></div>
 
-    <div class="led-actions">
-      <button class="btn-accent" style="flex:1" onclick="sendLed()">Применить</button>
-      <button class="btn-off" onclick="ledOff()">Выкл</button>
-    </div>
   </div>
 </div>
 
@@ -527,6 +510,9 @@ const KEY_MAP = {
 const KEY_IDS = {
   ArrowUp:'kUp', ArrowDown:'kDown', ArrowLeft:'kLeft', ArrowRight:'kRight'
 };
+const ID_TO_KEY = {
+  kUp: 'ArrowUp', kDown: 'ArrowDown', kLeft: 'ArrowLeft', kRight: 'ArrowRight'
+};
 
 function clamp(v) { return Math.max(-MAX, Math.min(MAX, v)); }
 
@@ -540,6 +526,12 @@ function stopWheels() { setSpeed(0, 0); }
 
 document.addEventListener('keydown', e => {
   if (activeTab !== 'pid') return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    const stopBtn = document.getElementById('stopBtn');
+    if (stopBtn) stopBtn.click();
+    return;
+  }
   if (!KEY_MAP[e.key]) return;
   e.preventDefault();
   if (held.has(e.key)) return; // ignore key-repeat
@@ -554,6 +546,28 @@ document.addEventListener('keyup', e => {
   const id = KEY_IDS[e.key];
   if (id) document.getElementById(id).classList.remove('lit');
 });
+
+function bindTouchArrowControls() {
+  Object.entries(ID_TO_KEY).forEach(([id, key]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    const press = e => {
+      if (activeTab !== 'pid') return;
+      e.preventDefault();
+      const fn = KEY_MAP[key];
+      if (!fn) return;
+      fn();
+      el.classList.add('lit');
+    };
+    const release = () => el.classList.remove('lit');
+
+    el.addEventListener('pointerdown', press);
+    el.addEventListener('pointerup', release);
+    el.addEventListener('pointercancel', release);
+    el.addEventListener('pointerleave', release);
+  });
+}
 
 /* ═══════════════════════════ Chart ══════════════════════════════════════ */
 const WINDOW_S = 20;
@@ -628,7 +642,7 @@ function pushChart(ml, tl, mr, tr) {
 
 /* ═══════════════════════════ Serial parsing ═════════════════════════════ */
 const logEl   = document.getElementById('log');
-const SPD_RE  = /SPD L=([\d.\-]+) mm\/s R=([\d.\-]+) mm\/s.*Target L=([\d.\-]+) mm\/s R=([\d.\-]+) mm\/s/;
+const SPD_RE  = /SPD L=([\d.\-]+) mm\/s R=([\d.\-]+) mm\/s(?:.*Target L=([\d.\-]+) mm\/s R=([\d.\-]+) mm\/s)?/;
 
 function handleLine(line) {
   logEl.textContent += line + '\n';
@@ -637,7 +651,13 @@ function handleLine(line) {
     logEl.textContent = logEl.textContent.slice(-15000);
 
   const m = SPD_RE.exec(line);
-  if (m) pushChart(+m[1], +m[3], +m[2], +m[4]);
+  if (!m) return;
+
+  const measuredL = +m[1];
+  const measuredR = +m[2];
+  const targetL = m[3] !== undefined ? +m[3] : spdL;
+  const targetR = m[4] !== undefined ? +m[4] : spdR;
+  pushChart(measuredL, targetL, measuredR, targetR);
 }
 
 /* ═══════════════════════════ Camera ═════════════════════════════════════ */
@@ -675,6 +695,7 @@ function renderColors() {
 function onLedChange() {
   const br = +document.getElementById('bright').value;
   document.getElementById('bright-v').textContent = br;
+  send(`SET_LED ${br} ${selColor}`);
   const c = COLORS.find(x => x.name === selColor);
   if (!c || c.name === 'black') {
     document.getElementById('ledBar').style.cssText =
@@ -690,21 +711,10 @@ function onLedChange() {
     `box-shadow:0 0 ${Math.round(br/4)}px rgb(${r},${g},${b})`;
 }
 
-function sendLed() {
-  send(`SET_LED ${document.getElementById('bright').value} ${selColor}`);
-}
-
-function ledOff() {
-  selColor = 'black';
-  document.getElementById('bright').value = 0;
-  renderColors();
-  onLedChange();
-  send('SET_LED 0 black');
-}
-
 /* ═══════════════════════════ Init ══════════════════════════════════════ */
 renderColors();
 onLedChange();
+bindTouchArrowControls();
 connectWS();
 </script>
 </body>

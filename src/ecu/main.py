@@ -39,6 +39,8 @@ serial_conn: Optional[serial.Serial] = None
 serial_lock  = threading.Lock()
 ws_clients:  List[WebSocket] = []
 main_loop:   Optional[asyncio.AbstractEventLoop] = None
+stop_event = threading.Event()
+reader_thread: Optional[threading.Thread] = None
 
 app = FastAPI(title="Robot Controller")
 
@@ -58,7 +60,7 @@ def open_serial() -> None:
 
 def serial_reader_thread() -> None:
     """Фоновый поток: читает строки из serial и рассылает всем WS-клиентам."""
-    while True:
+    while not stop_event.is_set():
         try:
             if serial_conn and serial_conn.is_open:
                 raw  = serial_conn.readline()
@@ -67,7 +69,8 @@ def serial_reader_thread() -> None:
                     asyncio.run_coroutine_threadsafe(broadcast(line), main_loop)
             else:
                 time.sleep(1)
-                open_serial()
+                if not stop_event.is_set():
+                    open_serial()
         except Exception as exc:
             print(f"[serial] ошибка чтения: {exc}")
             time.sleep(1)
@@ -93,10 +96,39 @@ async def broadcast(message: str) -> None:
 # --------------------------------------------------------------------------- #
 @app.on_event("startup")
 async def startup_event() -> None:
-    global main_loop
+    global main_loop, reader_thread
     main_loop = asyncio.get_event_loop()
+    stop_event.clear()
     open_serial()
-    threading.Thread(target=serial_reader_thread, daemon=True).start()
+    reader_thread = threading.Thread(target=serial_reader_thread, daemon=True)
+    reader_thread.start()
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    stop_event.set()
+
+    # Явно закрываем WS, чтобы uvicorn не зависал на ожидании клиентов.
+    clients = list(ws_clients)
+    ws_clients.clear()
+    if clients:
+        await asyncio.gather(
+            *(ws.close(code=1001, reason="Server shutdown") for ws in clients),
+            return_exceptions=True,
+        )
+
+    with serial_lock:
+        global serial_conn
+        if serial_conn and serial_conn.is_open:
+            try:
+                serial_conn.close()
+            except Exception as exc:
+                print(f"[serial] ошибка закрытия: {exc}")
+            finally:
+                serial_conn = None
+
+    if reader_thread and reader_thread.is_alive():
+        reader_thread.join(timeout=2)
 
 
 # --------------------------------------------------------------------------- #
@@ -178,4 +210,10 @@ if __name__ == "__main__":
 
     print(f"[server]  http://{args.host}:{args.http_port}")
     print(f"[camera]  проксируем http://localhost:{GO2RTC_PORT}/api/stream.mjpeg?src={CAMERA_SRC}")
-    uvicorn.run(app, host=args.host, port=args.http_port, log_level="info")
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.http_port,
+        log_level="info",
+        timeout_graceful_shutdown=5,
+    )

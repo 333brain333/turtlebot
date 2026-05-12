@@ -1,7 +1,6 @@
 [Unit]
 Description=Start go2rtc server
-After=tb_on_powerup.service
-Requires=tb_on_powerup.service
+After=tb_on_powerup.service multi-user.target
 
 [Service]
 Type=simple

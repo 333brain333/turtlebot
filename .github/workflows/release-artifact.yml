@@ -25,6 +25,7 @@ jobs:
           cp -a config/. release/config/
           cp -a src/ecu/main.py release/main.py
           cp -a src/ecu/index.html release/index.html
+          cp -a src/ecu/install.sh release/install.sh
 
       - name: Set artifact name
         run: |

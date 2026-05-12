@@ -1,14 +1,14 @@
 [Unit]
 Description=Start ECU FastAPI web server
-After=tb_on_powerup.service tb_go2rtc.service
-Requires=tb_on_powerup.service
-Wants=tb_go2rtc.service
+After=tb_go2rtc.service multi-user.target
+Requires=tb_go2rtc.service
 
 [Service]
 Type=simple
 WorkingDirectory=/home/agrodroid/releases/active_release
 ExecStart=/usr/bin/env python3 main.py --port /dev/ttyTHS2 --baud 115200
 Restart=on-failure
+TimeoutStopSec=8
 
 [Install]
 WantedBy=multi-user.target
