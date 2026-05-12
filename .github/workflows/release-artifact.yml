@@ -1,0 +1,36 @@
+name: Build release artifact
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-release-artifact:
+    name: Build release zip
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Stage release files
+        run: |
+          set -euo pipefail
+
+          mkdir -p release/music release/services
+          cp -a music/. release/music/
+          cp -a src/ecu/services/. release/services/
+
+      - name: Set artifact name
+        run: |
+          set -euo pipefail
+
+          echo "ARTIFACT_NAME=release_${GITHUB_SHA}" >> "${GITHUB_ENV}"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: release/*
+          if-no-files-found: error
