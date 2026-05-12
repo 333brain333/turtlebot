@@ -5,7 +5,6 @@ Before=shutdown.target reboot.target halt.target
 
 [Service]
 Type=oneshot
-User=agrodroid
 ExecStart=/usr/bin/mpv --no-video /home/agrodroid/Music/power_down.m4a
 TimeoutStartSec=15
 

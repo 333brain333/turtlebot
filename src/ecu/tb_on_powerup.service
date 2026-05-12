@@ -4,8 +4,7 @@ After=sound.target multi-user.target
 
 [Service]
 Type=simple
-User=agrodroid
-ExecStart=/bin/bash -c 'sudo stty -F /dev/ttyTHS2 115200; sleep 10 && /usr/bin/mpv --no-video /home/agrodroid/Music/power_up.m4a'
+ExecStart=/bin/bash -c 'stty -F /dev/ttyTHS2 115200; sleep 10 && /usr/bin/mpv --no-video /home/agrodroid/Music/power_up.m4a'
 Restart=no
 
 [Install]
