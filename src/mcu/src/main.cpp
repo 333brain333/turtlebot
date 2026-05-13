@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "main.h"
 #include <FastLED.h>
+#include <Wire.h>
 
 #define LED_STRIP_PIN 13       // Пин подключения ленты к ESP32
 #define NUM_LEDS    32          // Количество светодиодов в ленте
@@ -23,6 +24,17 @@
 #define JETSON_UART_RX 16     // RX2: прием данных от Jetson TX
 #define JETSON_UART_TX 17     // TX2: передача данных на Jetson RX
 #define JETSON_UART_BAUD 115200
+
+#define INA226_I2C_SDA 21
+#define INA226_I2C_SCL 22
+#define INA226_I2C_ADDRESS 0x40
+#define INA226_SHUNT_OHMS 0.01f
+
+#define INA226_REG_CONFIG 0x00
+#define INA226_REG_SHUNT_VOLTAGE 0x01
+#define INA226_REG_BUS_VOLTAGE 0x02
+#define INA226_REG_MANUFACTURER_ID 0xFE
+#define INA226_REG_DIE_ID 0xFF
 
 /**
  * Глобальные переменные для хранения текущего счёта тиков (импульсов) энкодеров.
@@ -88,6 +100,12 @@ uint8_t currentLedBrightness = BRIGHTNESS;
 CRGB currentLedColor = CRGB::White;
 bool ledsNeedUpdate = true;
 
+bool ina226Available = false;
+uint8_t ina226Address = INA226_I2C_ADDRESS;
+float ina226BusVoltage = 0.0f;
+float ina226Current = 0.0f;
+bool motorDriverEnabled = true;
+
 
 /**
  * SETUP
@@ -96,6 +114,19 @@ void setup() {
   Serial2.begin(JETSON_UART_BAUD, SERIAL_8N1, JETSON_UART_RX, JETSON_UART_TX);
   delay(1000);
   Serial2.println("System started");
+
+  pinMode(INA226_I2C_SDA, INPUT_PULLUP);
+  pinMode(INA226_I2C_SCL, INPUT_PULLUP);
+  Wire.begin(INA226_I2C_SDA, INA226_I2C_SCL);
+  Wire.setClock(100000);
+  Wire.setTimeOut(50);
+  ina226Available = initIna226();
+  if (ina226Available) {
+    Serial2.printf("INA226 started addr=0x%02X\r\n", ina226Address);
+  } else {
+    Serial2.println("INA226 not found");
+  }
+
   // Инициализация ленты с указанием пина, типа и массива светодиодов
   FastLED.addLeds<LED_TYPE, LED_STRIP_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(currentLedBrightness);
@@ -165,6 +196,7 @@ void loop() {
     computeSpeed();
     updateOdometry();
     computeWheelsPID();
+    updateIna226();
     PIDTimer = millis();
   }
 
@@ -172,8 +204,22 @@ void loop() {
   if (millis() - printTimer > 100){
     Serial2.printf("POS X=%.2f Y=%.2f Th=%.2f ", xPos, yPos, theta);
     Serial2.printf("ENC L=%ld R=%ld ", left_encoder_value, right_encoder_value);
-    Serial2.printf("SPD L=%.2f mm/s R=%.2f mm/s\r\n", vlSpeedFiltered, vrSpeedFiltered);
+    Serial2.printf("SPD L=%.2f mm/s R=%.2f mm/s ", vlSpeedFiltered, vrSpeedFiltered);
+    if (ina226Available) {
+      Serial2.printf("PWR V=%.3f I=%.3f A\r\n", ina226BusVoltage, ina226Current);
+    } else {
+      Serial2.print("PWR V=nan I=nan A\r\n");
+    }
     printTimer = millis();
+  }
+
+  static uint32_t ina226RetryTimer = 0;
+  if (!ina226Available && millis() - ina226RetryTimer > 1000) {
+    ina226Available = initIna226();
+    if (ina226Available) {
+      Serial2.printf("INA226 started addr=0x%02X\r\n", ina226Address);
+    }
+    ina226RetryTimer = millis();
   }
 }
 
@@ -228,6 +274,13 @@ void processCommand(String command) {
     } else {
       Serial2.println("ERROR: Invalid SET_LED format");
     }
+  } else if (command == "SHUTDOWN") {
+    shutdownSystem();
+    Serial2.println("OK: Shutdown");
+  } else if (command == "I2C_SCAN") {
+    scanI2cBus();
+  } else if (command == "INA226_DEBUG") {
+    printIna226Debug();
   } else {
     Serial2.println("ERROR: Unknown command");
   }
@@ -266,6 +319,14 @@ bool parseSetPWM(const String& command, int* leftA_PWM, int* leftB_PWM, int* rig
 
 
 void setMotorsPWM(int leftA, int leftB, int rightA, int rightB) {
+  if (!motorDriverEnabled) {
+    analogWrite(LEFT_MOTOR_A, 0);
+    analogWrite(LEFT_MOTOR_B, 0);
+    analogWrite(RIGHT_MOTOR_A, 0);
+    analogWrite(RIGHT_MOTOR_B, 0);
+    return;
+  }
+
   leftA  = constrain(leftA, 0, 255);
   leftB  = constrain(leftB, 0, 255);
   rightA = constrain(rightA, 0, 255);
@@ -275,6 +336,20 @@ void setMotorsPWM(int leftA, int leftB, int rightA, int rightB) {
   analogWrite(LEFT_MOTOR_B,   leftB);
   analogWrite(RIGHT_MOTOR_A,  rightA);
   analogWrite(RIGHT_MOTOR_B,  rightB);
+}
+
+void shutdownSystem() {
+  targetLeftWheelSpeed = 0;
+  targetRightWheelSpeed = 0;
+  motorDriverEnabled = false;
+  setMotorsPWM(0, 0, 0, 0);
+
+  currentLedBrightness = 0;
+  currentLedColor = CRGB::Black;
+  fill_solid(leds, NUM_LEDS, CRGB::Black);
+  FastLED.setBrightness(0);
+  FastLED.show();
+  ledsNeedUpdate = false;
 }
 
 void updateOdometry() {
@@ -338,6 +413,11 @@ void computeSpeed() {
 }
 
 void computeWheelsPID(){
+  if (!motorDriverEnabled) {
+    setMotorsPWM(0, 0, 0, 0);
+    return;
+  }
+
   // Ограничение интегральной составляющей (anti-windup)
   const float integralLimit = 100.0;
 
@@ -415,6 +495,142 @@ void computeWheelsPID(){
   }
 
   setMotorsPWM(leftA_PWM, leftB_PWM, rightA_PWM, rightB_PWM);
+}
+
+bool initIna226() {
+  if (!findIna226()) {
+    return false;
+  }
+
+  // AVG=16, VBUSCT=1.1 ms, VSHCT=1.1 ms, continuous shunt+bus mode.
+  return writeIna226Register(INA226_REG_CONFIG, 0x4527);
+}
+
+bool findIna226() {
+  uint8_t firstRespondingAddress = 0;
+
+  for (uint8_t address = 0x40; address <= 0x4F; address++) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission() != 0) {
+      continue;
+    }
+
+    if (firstRespondingAddress == 0) {
+      firstRespondingAddress = address;
+    }
+
+    ina226Address = address;
+    uint16_t manufacturerId = 0;
+    uint16_t dieId = 0;
+    if (readIna226Register(INA226_REG_MANUFACTURER_ID, &manufacturerId) &&
+        readIna226Register(INA226_REG_DIE_ID, &dieId) &&
+        manufacturerId == 0x5449 &&
+        (dieId & 0xFFF0) == 0x2260) {
+      return true;
+    }
+  }
+
+  if (firstRespondingAddress != 0) {
+    ina226Address = firstRespondingAddress;
+    return true;
+  }
+
+  ina226Address = INA226_I2C_ADDRESS;
+  return false;
+}
+
+void updateIna226() {
+  if (!ina226Available) {
+    return;
+  }
+
+  uint16_t busRaw = 0;
+  uint16_t shuntRaw = 0;
+  if (!readIna226Register(INA226_REG_BUS_VOLTAGE, &busRaw) ||
+      !readIna226Register(INA226_REG_SHUNT_VOLTAGE, &shuntRaw)) {
+    ina226Available = false;
+    return;
+  }
+
+  ina226BusVoltage = busRaw * 0.00125f;
+  const float shuntVoltage = (int16_t)shuntRaw * 0.0000025f;
+  ina226Current = shuntVoltage / INA226_SHUNT_OHMS;
+}
+
+bool readIna226Register(uint8_t reg, uint16_t* value) {
+  Wire.beginTransmission(ina226Address);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) {
+    return false;
+  }
+
+  if (Wire.requestFrom(ina226Address, (uint8_t)2) != 2) {
+    return false;
+  }
+
+  *value = ((uint16_t)Wire.read() << 8) | Wire.read();
+  return true;
+}
+
+bool writeIna226Register(uint8_t reg, uint16_t value) {
+  Wire.beginTransmission(ina226Address);
+  Wire.write(reg);
+  Wire.write((uint8_t)(value >> 8));
+  Wire.write((uint8_t)(value & 0xFF));
+  return Wire.endTransmission() == 0;
+}
+
+void scanI2cBus() {
+  Serial2.print("I2C_SCAN");
+  bool foundAny = false;
+  for (uint8_t address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission() == 0) {
+      Serial2.printf(" 0x%02X", address);
+      foundAny = true;
+    }
+  }
+
+  if (!foundAny) {
+    Serial2.print(" none");
+  }
+  Serial2.println();
+}
+
+void printIna226Debug() {
+  Serial2.printf("INA226_DEBUG sda=%d scl=%d addr=0x%02X available=%d ",
+                 INA226_I2C_SDA,
+                 INA226_I2C_SCL,
+                 ina226Address,
+                 ina226Available ? 1 : 0);
+
+  Wire.beginTransmission(INA226_I2C_ADDRESS);
+  uint8_t probeError = Wire.endTransmission();
+  Serial2.printf("probe_0x40=%u ", probeError);
+
+  ina226Address = INA226_I2C_ADDRESS;
+  uint16_t config = 0;
+  uint16_t busRaw = 0;
+  uint16_t shuntRaw = 0;
+  uint16_t manufacturerId = 0;
+  uint16_t dieId = 0;
+  bool okConfig = readIna226Register(INA226_REG_CONFIG, &config);
+  bool okBus = readIna226Register(INA226_REG_BUS_VOLTAGE, &busRaw);
+  bool okShunt = readIna226Register(INA226_REG_SHUNT_VOLTAGE, &shuntRaw);
+  bool okManufacturer = readIna226Register(INA226_REG_MANUFACTURER_ID, &manufacturerId);
+  bool okDie = readIna226Register(INA226_REG_DIE_ID, &dieId);
+
+  Serial2.printf("cfg=%d:0x%04X bus=%d:%u shunt=%d:%d mfg=%d:0x%04X die=%d:0x%04X\r\n",
+                 okConfig ? 1 : 0,
+                 config,
+                 okBus ? 1 : 0,
+                 busRaw,
+                 okShunt ? 1 : 0,
+                 (int16_t)shuntRaw,
+                 okManufacturer ? 1 : 0,
+                 manufacturerId,
+                 okDie ? 1 : 0,
+                 dieId);
 }
 
 // Функция для парсинга команды установки коэффициентов: "SET_COEFF Kp Ki Kd Kff"

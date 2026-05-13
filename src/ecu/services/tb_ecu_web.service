@@ -5,6 +5,7 @@ Requires=tb_go2rtc.service
 
 [Service]
 Type=simple
+User=agrodroid
 WorkingDirectory=/home/agrodroid/releases/active_release
 ExecStart=/usr/bin/env python3 main.py --port /dev/ttyTHS2 --baud 115200
 Restart=on-failure
