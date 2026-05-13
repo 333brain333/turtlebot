@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
 
 jobs:
   build-release-artifact:
@@ -13,6 +19,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Stage release files
         run: |
@@ -31,11 +39,28 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "ARTIFACT_NAME=release_${GITHUB_SHA}" >> "${GITHUB_ENV}"
+          commit_sha="$(git rev-list -n 1 HEAD)"
+          echo "ARTIFACT_NAME=release_${commit_sha}" >> "${GITHUB_ENV}"
 
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v7
+      - name: Build release zip
+        run: |
+          set -euo pipefail
+
+          (cd release && zip -r "../${ARTIFACT_NAME}.zip" .)
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: release/*
+          path: ${{ env.ARTIFACT_NAME }}.zip
           if-no-files-found: error
+
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          gh release upload "${RELEASE_TAG}" "${ARTIFACT_NAME}.zip" --clobber
