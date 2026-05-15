@@ -1,3 +1,6 @@
 *.pyc
 .codex
 ws/*
+src/ecu/ws/build/
+src/ecu/ws/install/
+src/ecu/ws/log/

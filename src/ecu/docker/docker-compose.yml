@@ -1,8 +1,8 @@
 services:
   ros2:
     build:
-      context: .
-      dockerfile: dockerfile
+      context: ..
+      dockerfile: docker/dockerfile
       args:
         USERNAME: agrodroid
         USER_UID: 1000
@@ -21,7 +21,7 @@ services:
 
     volumes:
       - /dev:/dev
-      - /home/agrodroid/releases/active_release/ws:/ros2_ws
+      - ../ws:/ros2_ws
 
     environment:
       ROS_DOMAIN_ID: "10"

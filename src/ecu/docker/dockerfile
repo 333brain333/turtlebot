@@ -36,6 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-robot-state-publisher \
     && rm -rf /var/lib/apt/lists/*
 
+COPY ws/requirements.txt /tmp/ros2_requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/ros2_requirements.txt
+
 RUN rosdep init || true
 RUN rosdep update || true
 
