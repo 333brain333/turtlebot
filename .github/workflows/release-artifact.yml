@@ -35,6 +35,7 @@ jobs:
           cp -a src/ecu/index.html release/index.html
           cp -a src/ecu/install.sh release/install.sh
           cp -a src/ecu/docker/. release/docker/
+          cp -a src/ecu/ws/src/ release/ws/src/
 
       - name: Set artifact name
         run: |
