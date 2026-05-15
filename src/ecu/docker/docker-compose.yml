@@ -5,12 +5,14 @@ services:
       dockerfile: docker/dockerfile
       args:
         USERNAME: agrodroid
-        USER_UID: 1000
-        USER_GID: 1000
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
 
     image: tx2-ros2-humble:robot
 
     container_name: ros2_humble_tx2
+
+    user: agrodroid
 
 
 

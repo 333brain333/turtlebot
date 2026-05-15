@@ -4,6 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_DISTRO=humble
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
+ENV PIP_ROOT_USER_ACTION=ignore
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -39,9 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY ws/requirements.txt /tmp/ros2_requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/ros2_requirements.txt
 
-RUN rosdep init || true
-RUN rosdep update || true
-
+RUN if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then rosdep init; fi
 
 ARG USERNAME=agrodroid
 ARG USER_UID=1000
@@ -55,6 +54,8 @@ RUN echo "source /opt/ros/humble/setup.bash" >> /home/${USERNAME}/.bashrc
 RUN echo "[ -f /ros2_ws/install/setup.bash ] && source /ros2_ws/install/setup.bash" >> /home/${USERNAME}/.bashrc
 
 USER ${USERNAME}
+
+RUN rosdep update || true
 
 WORKDIR /ros2_ws
 
