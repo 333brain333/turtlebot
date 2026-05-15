@@ -25,6 +25,19 @@
 #define JETSON_UART_TX 17     // TX2: передача данных на Jetson RX
 #define JETSON_UART_BAUD 115200
 
+
+/*
+  * Константы для работы с INA226:
+  * - INA226_I2C_SDA и INA226_I2C_SCL определяют пины для I2C шины, к которой подключён датчик.
+  * - INA226_I2C_ADDRESS — стандартный адрес устройства на шине I2C (может быть изменён в зависимости от конкретной платы).
+  * - INA226_SHUNT_OHMS — сопротивление шунта в Омах, используемое для расчёта тока по измеренному напряжению на шунте.
+  *
+  * Регистры:
+  * - INA226_REG_CONFIG — регистр конфигурации, который нужно настроить для правильной работы датчика.
+  * - INA226_REG_SHUNT_VOLTAGE — регистр, в котором хранится измеренное напряжение на шунте (для расчёта тока).
+  * - INA226_REG_BUS_VOLTAGE — регистр, в котором хранится измеренное напряжение питания (для расчёта мощности).
+  * - INA226_REG_MANUFACTURER_ID и INA226_REG_DIE_ID — служебные регистры для идентификации устройства.
+*/
 #define INA226_I2C_SDA 21
 #define INA226_I2C_SCL 22
 #define INA226_I2C_ADDRESS 0x40
@@ -71,6 +84,13 @@ float pidKi = 1.3;
 float pidKd = 0.01;
 float pidKff = 0.25;
 
+// Глобальные PID-состояния
+float errorLeftIntegral = 0;
+float errorRightIntegral = 0;
+float prevErrorLeft = 0;
+float prevErrorRight = 0;
+uint32_t lastPIDTime = 0;
+
 /**
  * Переменные для настройки моргания светодиодом на плате
  */
@@ -90,6 +110,14 @@ const unsigned long LED_BLINK_INTERVAL_MS = 500;
  */
 void left_interrupt() {digitalRead(LEFT_ENCODER_B)?left_encoder_value++:left_encoder_value--;}
 void right_interrupt() {digitalRead(RIGHT_ENCODER_B)?right_encoder_value++:right_encoder_value--;}
+
+
+/****************************************************************************
+ * Переменные компенсации прямолинейного движения
+ ***************************************************************************/
+bool goingStraight = false;  // Флаг, указывающий, что робот едет прямо (угловая скорость ≈ 0)
+long leftBase = 0;           // Значение left_encoder_value в момент начала прямолинейного движения
+long rightBase = 0;          // Значение right_encoder_value в момент начала прямолинейного движения
 
 /*
  * Для светодиодной ленты FastLED, мы создаём 
@@ -129,9 +157,7 @@ void setup() {
 
   // Инициализация ленты с указанием пина, типа и массива светодиодов
   FastLED.addLeds<LED_TYPE, LED_STRIP_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
-  FastLED.setBrightness(currentLedBrightness);
-  fill_solid(leds, NUM_LEDS, currentLedColor);
-  FastLED.show();
+  blinkLedStripOnStartup();
 
   /**
    * Подключение функций-прерываний (interrupt service routines, ISR) к выводам энкодеров.
@@ -274,6 +300,14 @@ void processCommand(String command) {
     } else {
       Serial2.println("ERROR: Invalid SET_LED format");
     }
+  } else if (command.startsWith("SET_ROBOT_VELOCITY")) {
+    float linVel = 0.0, angVel = 0.0;
+    if (parseSetRobotVelocity(command, &linVel, &angVel)) {
+      setRobotVelocity(linVel, angVel);
+      Serial2.println("OK: Robot velocity set");
+    } else {
+      Serial2.println("ERROR: Invalid robot velocity command");
+    }
   } else if (command == "SHUTDOWN") {
     shutdownSystem();
     Serial2.println("OK: Shutdown");
@@ -352,6 +386,29 @@ void shutdownSystem() {
   ledsNeedUpdate = false;
 }
 
+void blinkLedStripOnStartup() {
+  FastLED.setBrightness(currentLedBrightness);
+
+  fill_solid(leds, NUM_LEDS, currentLedColor);
+  FastLED.show();
+  delay(500);
+
+  fill_solid(leds, NUM_LEDS, CRGB::Black);
+  FastLED.show();
+  delay(500);
+
+  fill_solid(leds, NUM_LEDS, currentLedColor);
+  FastLED.show();
+  delay(500);
+
+  currentLedBrightness = 0;
+  currentLedColor = CRGB::Black;
+  FastLED.setBrightness(currentLedBrightness);
+  fill_solid(leds, NUM_LEDS, currentLedColor);
+  FastLED.show();
+  ledsNeedUpdate = false;
+}
+
 void updateOdometry() {
   long deltaLeft = left_encoder_value - last_left_encoder;
   long deltaRight = right_encoder_value - last_right_encoder;
@@ -412,6 +469,16 @@ void computeSpeed() {
   }
 }
 
+void resetPID() {
+  errorLeftIntegral = 0;
+  errorRightIntegral = 0;
+  prevErrorLeft = 0;
+  prevErrorRight = 0;
+  vlSpeedFiltered = 0;
+  vrSpeedFiltered = 0;
+  lastPIDTime = millis();
+}
+
 void computeWheelsPID(){
   if (!motorDriverEnabled) {
     setMotorsPWM(0, 0, 0, 0);
@@ -421,26 +488,25 @@ void computeWheelsPID(){
   // Ограничение интегральной составляющей (anti-windup)
   const float integralLimit = 100.0;
 
-  // Статические переменные для состояния PID для каждого колеса
-  static float errorLeftIntegral = 0;
-  static float errorRightIntegral = 0;
-  static float prevErrorLeft = 0;
-  static float prevErrorRight = 0;
-  static uint32_t lastPIDTime = millis();
   // Для сброса интегральной составляющей при смене целевой скорости
   static float lastTargetLeft = 0.0;
   static float lastTargetRight = 0.0;
 
   // Сброс интеграла, если целевая скорость изменилась
   if(targetLeftWheelSpeed != lastTargetLeft){
+    // resetPID();
     errorLeftIntegral = 0;
     prevErrorLeft = 0;
     lastTargetLeft = targetLeftWheelSpeed;
   }
   if(targetRightWheelSpeed != lastTargetRight){
+    // resetPID();
     errorRightIntegral = 0;
     prevErrorRight = 0;
     lastTargetRight = targetRightWheelSpeed;
+  }
+  if (targetLeftWheelSpeed == 0 && targetRightWheelSpeed == 0) {
+    resetPID();
   }
 
   // Вычисляем интервал dt (в секундах)
@@ -474,6 +540,20 @@ void computeWheelsPID(){
   // Добавляем feedforward
   float outputLeft  = pidLeft  + pidKff * targetLeftWheelSpeed;
   float outputRight = pidRight + pidKff * targetRightWheelSpeed;
+
+  // --- Компенсация прямолинейного движения ---
+  if (goingStraight && fabs(targetLeftWheelSpeed) > 1.0 && fabs(targetRightWheelSpeed) > 1.0) {
+    // Вычисляем накопленное смещение от базового значения, зафиксированного при старте прямолинейного движения
+    long leftTicks  = left_encoder_value - leftBase;
+    long rightTicks = right_encoder_value - rightBase;
+    long diff = leftTicks - rightTicks;  // если diff > 0, левое колесо продвинулось дальше
+    float KencStraight = 3.0f;  // Подберите опытным путём
+    float corr = KencStraight * (float)diff;
+    // Применяем корректировку: по 50% для каждого колеса
+    outputLeft  -= corr * 0.5f;
+    outputRight += corr * 0.5f;
+  }
+  // --- Конец компенсации ---
 
   // Преобразование в значения ШИМ
   int leftA_PWM = 0, leftB_PWM = 0;
@@ -702,4 +782,45 @@ bool parseColorName(const String& name, CRGB* color) {
     return false;
   }
   return true;
+}
+
+bool parseSetRobotVelocity(const String& command, float* linearVelocity, float* angularVelocity) {
+  int index1 = command.indexOf(' ');
+  if (index1 == -1) return false;
+  int index2 = command.indexOf(' ', index1 + 1);
+  if (index2 == -1) return false;
+  *linearVelocity = command.substring(index1 + 1, index2).toFloat();
+  *angularVelocity = command.substring(index2 + 1).toFloat();
+  return true;
+}
+
+
+/****************************************************************************
+ * Функция для установки скорости робота (линейной и угловой)
+ * linearVelocity в мм/с, angularVelocity в рад/с
+ ***************************************************************************/
+void setRobotVelocity(float linearVelocity, float angularVelocity) {
+  // Если оба параметра (линейная и угловая скорости) близки к нулю – остановка робота
+  if (fabs(linearVelocity) < 10 && fabs(angularVelocity) < 0.1) {
+    targetLeftWheelSpeed = 0;
+    targetRightWheelSpeed = 0;
+    vlSpeedFiltered = 0;
+    vrSpeedFiltered = 0;
+    resetPID();
+    goingStraight = false;
+    return;
+  }
+  
+  // Если угловая скорость почти нулевая, считаем, что едем прямо
+  if (fabs(angularVelocity) < 0.0001f) {
+    goingStraight = true;
+    leftBase = left_encoder_value;    // фиксируем текущее значение для левого энкодера
+    rightBase = right_encoder_value;  // фиксируем текущее значение для правого энкодера
+  } else {
+    goingStraight = false;
+  }
+  
+  // Вычисляем целевые скорости для левого и правого колёс по обратной кинематике
+  targetLeftWheelSpeed = linearVelocity - (angularVelocity * WHEEL_BASE / 2.0);
+  targetRightWheelSpeed = linearVelocity + (angularVelocity * WHEEL_BASE / 2.0);
 }

@@ -1,3 +1,0 @@
-streams:
-  webcam:
-    - exec:ffmpeg -f v4l2 -input_format mjpeg -i /dev/video0 -c:v copy -f mjpeg -

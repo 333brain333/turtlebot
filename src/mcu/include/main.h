@@ -35,6 +35,7 @@ void updateOdometry();
 void computeSpeed();
 void computeWheelsPID();
 void shutdownSystem();
+void blinkLedStripOnStartup();
 bool initIna226();
 bool findIna226();
 void updateIna226();
@@ -46,4 +47,7 @@ bool parseSetCoeff(const String& command, float* Kp, float* Ki, float* Kd, float
 bool parseSetSpeed(const String& command, int* speedLeft, int* speedRight);
 bool parseSetLed(const String& command, int* brightness, String* colorName);
 bool parseColorName(const String& name, CRGB* color);
+void resetPID();
+void setRobotVelocity(float linearVelocity, float angularVelocity);
+bool parseSetRobotVelocity(const String& command, float* linearVelocity, float* angularVelocity);
 #endif // MAIN_H
