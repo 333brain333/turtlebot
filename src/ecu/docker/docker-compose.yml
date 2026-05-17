@@ -31,4 +31,9 @@ services:
 
     restart: unless-stopped
 
-    command: sleep infinity
+    command: >
+      bash -lc "source /opt/ros/humble/setup.bash
+      && cd /ros2_ws
+      && colcon build --symlink-install
+      && source install/setup.bash
+      && ros2 launch robot_bringup robot_bringup.launch.py"
