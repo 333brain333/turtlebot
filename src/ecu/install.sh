@@ -16,6 +16,31 @@ apt_package_available() {
   apt-cache show "$1" >/dev/null 2>&1
 }
 
+install_ldlidar_udev_rules() {
+  local rules_src="./ros2_ws/src/ldrobot-lidar-ros2/rules/ldlidar.rules"
+  local rules_dst="/etc/udev/rules.d/ldlidar.rules"
+
+  if [ ! -f "$rules_src" ]; then
+    log "Skipping LDRobot udev rules; $rules_src was not found"
+    return
+  fi
+
+  log "Installing LDRobot udev rules"
+  cp -f "$rules_src" "$rules_dst"
+  chmod 0644 "$rules_dst"
+
+  if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || true
+    udevadm trigger || true
+  fi
+
+  if systemctl list-unit-files udev.service >/dev/null 2>&1; then
+    systemctl restart udev || true
+  elif command -v service >/dev/null 2>&1; then
+    service udev restart || true
+  fi
+}
+
 install_docker_apt_repo() {
   . /etc/os-release
 
@@ -169,6 +194,8 @@ systemctl restart nginx
 log "nginx is serving turtlebot on port 80"
 
 ensure_docker
+
+install_ldlidar_udev_rules
 
 log "Recreating ROS2 docker container"
 (

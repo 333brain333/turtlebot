@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'robot_odom'
+package_name = 'robot_driver'
 
 setup(
     name=package_name,
@@ -13,8 +13,8 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='agrodroid',
-    maintainer_email='agrodroid@todo.todo',
+    maintainer='andrew',
+    maintainer_email='a.kotelnikov@cognitivepilot.com',
     description='TODO: Package description',
     license='TODO: License declaration',
     extras_require={
@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'serial_to_odom = robot_odom.serial_to_odom:main',
+            'robot_driver_node = robot_driver.robot_driver_node:main',
         ],
     },
 )
