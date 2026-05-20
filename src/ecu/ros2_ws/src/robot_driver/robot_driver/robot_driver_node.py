@@ -6,32 +6,38 @@ from rclpy.node import Node
 from geometry_msgs.msg import Pose2D, Twist
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
+from std_msgs.msg import String
 
 import tf2_ros
 import serial
 import re
 from transforms3d.euler import euler2quat
 
+
 class RobotDriverNode(Node):
     def __init__(self):
-        super().__init__('robot_driver_node')
+        super().__init__("robot_driver_node")
 
         # 1. Подписка на /cmd_vel для приёма скоростей
         self.cmd_vel_sub = self.create_subscription(
-            Twist,
-            '/cmd_vel',
-            self.cmd_vel_callback,
-            10
+            Twist, "/cmd_vel", self.cmd_vel_callback, 10
         )
         self.set_pose_sub = self.create_subscription(
-            Pose2D,
-            '/set_pose',
-            self.set_pose_callback,
-            10
+            Pose2D, "/set_pose", self.set_pose_callback, 10
+        )
+        self.set_led_sub = self.create_subscription(
+            String, "/SET_LED", self.set_led_callback, 10
+        )
+        self.shutdown_sub = self.create_subscription(
+            String, "/SHUTDOWN", self.shutdown_callback, 10
+        )
+        self.set_coeff_sub = self.create_subscription(
+            String, "/SET_COEFF", self.set_coeff_callback, 10
         )
 
         # 2. Паблишер одометрии
-        self.odom_pub = self.create_publisher(Odometry, 'odom', 10)
+        self.odom_pub = self.create_publisher(Odometry, "/odom", 10)
+        self.raw_esp32_pub = self.create_publisher(String, "/ESP32_RAW", 50)
 
         # 3. TF Broadcaster
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
@@ -42,36 +48,49 @@ class RobotDriverNode(Node):
         self.get_logger().info(f"Opened serial port: {serial_port_path}")
 
         # 5. Регулярка для парсинга строк вида: "POS X=120.00 Y=150.00 Th=0.45"
-        self.pos_pattern = re.compile(r'POS X=([\-\d\.]+) Y=([\-\d\.]+) Th=([\-\d\.]+)')
+        self.pos_pattern = re.compile(r"POS X=([\-\d\.]+) Y=([\-\d\.]+) Th=([\-\d\.]+)")
 
         # 6. Периодический таймер для чтения данных из Serial
         self.timer_period = 0.05  # 20 Гц
-        self.read_serial_timer = self.create_timer(self.timer_period, self.read_serial_timer_callback)
+        self.read_serial_timer = self.create_timer(
+            self.timer_period, self.read_serial_timer_callback
+        )
+
+    def write_serial_command(self, command: str):
+        command = command.strip()
+        if not command:
+            return
+        try:
+            self.ser.write((command + "\n").encode("utf-8"))
+            self.get_logger().info(f"Sent command: {command}")
+        except serial.SerialException as e:
+            self.get_logger().error(f"Failed to write to serial: {e}")
 
     def set_pose_callback(self, msg: Pose2D):
         x = msg.x * 1000
         y = msg.y * 1000
         command = f"SET_POSE {x:.2f} {y:.2f} {msg.theta:.2f}\n"
-        try:
-            self.ser.write(command.encode())
-            self.get_logger().info(f"Sent command: {command.strip()}")
-        except serial.SerialException as e:
-            self.get_logger().error(f"Failed to write to serial: {e}")
-    
+        self.write_serial_command(command)
+
     def cmd_vel_callback(self, msg: Twist):
         """
         Колбэк, вызывается при приходе сообщения в /cmd_vel
         Отправляем команду скорости на ESP32 по Serial.
         """
         linear_velocity = msg.linear.x * 1000.0  # м/с -> мм/с
-        angular_velocity = msg.angular.z         # рад/с
+        angular_velocity = msg.angular.z  # рад/с
 
         command = f"SET_ROBOT_VELOCITY {linear_velocity:.2f} {angular_velocity:.2f}\n"
-        try:
-            self.ser.write(command.encode())
-            self.get_logger().info(f"Sent command: {command.strip()}")
-        except serial.SerialException as e:
-            self.get_logger().error(f"Failed to write to serial: {e}")
+        self.write_serial_command(command)
+
+    def set_led_callback(self, msg: String):
+        self.write_serial_command(msg.data)
+
+    def shutdown_callback(self, msg: String):
+        self.write_serial_command(msg.data or "SHUTDOWN")
+
+    def set_coeff_callback(self, msg: String):
+        self.write_serial_command(msg.data)
 
     def read_serial_timer_callback(self):
         """
@@ -81,17 +100,19 @@ class RobotDriverNode(Node):
         # Считываем всё, что накопилось в буфере (т.к. timeout=0.1)
         try:
             # Можем читать построчно, т.к. ESP32 шлёт строки.
-            line = self.ser.readline().decode('ascii', errors='ignore').strip()
+            line = self.ser.readline().decode("ascii", errors="ignore").strip()
 
             if not line:
                 return  # нет данных в данный момент
+
+            self.raw_esp32_pub.publish(String(data=line))
 
             # Проверим, похоже ли это на строку одометрии
             match = self.pos_pattern.search(line)
             if match:
                 x_mm = float(match.group(1))  # мм
                 y_mm = float(match.group(2))  # мм
-                th   = float(match.group(3))  # рад
+                th = float(match.group(3))  # рад
 
                 # Переводим мм -> м
                 x = x_mm / 1000.0
@@ -100,15 +121,17 @@ class RobotDriverNode(Node):
                 # Формируем Odometry
                 odom_msg = Odometry()
                 odom_msg.header.stamp = self.get_clock().now().to_msg()
-                odom_msg.header.frame_id = 'odom'
-                odom_msg.child_frame_id = 'base_link'
+                odom_msg.header.frame_id = "odom"
+                odom_msg.child_frame_id = "base_link"
 
                 odom_msg.pose.pose.position.x = x
                 odom_msg.pose.pose.position.y = y
                 odom_msg.pose.pose.position.z = 0.0
 
                 # Преобразуем угол в кватернион
-                q = euler2quat(0.0, 0.0, th)  # returns (w, x, y, z) - такая у transforms3d специфика
+                q = euler2quat(
+                    0.0, 0.0, th
+                )  # returns (w, x, y, z) - такая у transforms3d специфика
                 odom_msg.pose.pose.orientation.w = q[0]
                 odom_msg.pose.pose.orientation.x = q[1]
                 odom_msg.pose.pose.orientation.y = q[2]
@@ -120,8 +143,8 @@ class RobotDriverNode(Node):
                 # Одновременно шлём TF odom -> base_link
                 t = TransformStamped()
                 t.header.stamp = odom_msg.header.stamp
-                t.header.frame_id = 'odom'
-                t.child_frame_id = 'base_link'
+                t.header.frame_id = "odom"
+                t.child_frame_id = "base_link"
                 t.transform.translation.x = x
                 t.transform.translation.y = y
                 t.transform.translation.z = 0.0
@@ -141,6 +164,7 @@ class RobotDriverNode(Node):
         except serial.SerialException as e:
             self.get_logger().error(f"Failed to read from serial: {e}")
 
+
 def main(args=None):
     rclpy.init(args=args)
     node = RobotDriverNode()
@@ -148,5 +172,6 @@ def main(args=None):
     node.destroy_node()
     rclpy.shutdown()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

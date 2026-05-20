@@ -27,8 +27,8 @@ jobs:
           set -euo pipefail
 
           mkdir -p release/bin release/music release/services release/config release/ros2_ws/src release/docker
-          cp -a bin/. release/bin/
-          cp -a music/. release/music/
+          cp -a src/ecu/bin/. release/bin/
+          cp -a src/ecu/music/. release/music/
           cp -a src/ecu/services/. release/services/
           cp -a src/ecu/config/. release/config/
           cp -a src/ecu/main.py release/main.py

@@ -1,13 +1,14 @@
 [Unit]
 Description=Start ECU FastAPI web server
-After=tb_go2rtc.service multi-user.target
-Requires=tb_go2rtc.service
+After=docker.service tb_go2rtc.service multi-user.target
+Wants=docker.service tb_go2rtc.service
 
 [Service]
 Type=simple
 User=agrodroid
+SupplementaryGroups=docker
 WorkingDirectory=/home/agrodroid/releases/active_release
-ExecStart=/usr/bin/env python3 main.py --port /dev/ttyTHS2 --baud 115200
+ExecStart=/usr/bin/env python3 main.py
 Restart=on-failure
 TimeoutStopSec=8
 

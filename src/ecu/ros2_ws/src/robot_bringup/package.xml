@@ -7,7 +7,12 @@
   <maintainer email="222brain222@gmail.com">agrodroid</maintainer>
   <license>TODO: License declaration</license>
 
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ldlidar_node</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>robot_driver</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
