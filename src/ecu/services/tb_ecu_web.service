@@ -8,7 +8,7 @@ Type=simple
 User=agrodroid
 SupplementaryGroups=docker
 WorkingDirectory=/home/agrodroid/releases/active_release
-ExecStart=/usr/bin/env python3 main.py
+ExecStart=/usr/bin/env python3 web_control_center.py
 Restart=on-failure
 TimeoutStopSec=8
 
