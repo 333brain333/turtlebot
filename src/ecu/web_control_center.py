@@ -5,7 +5,7 @@ Robot Controller – FastAPI backend
     pip install fastapi uvicorn[standard]
 
 Запуск:
-    python3 main.py
+    python3 web_control_center.py
 
 Открыть в браузере: http://<jetson-ip>:8000
 """
@@ -421,8 +421,8 @@ def route_mcu_command(command: str) -> bool:
     return False
 
 
-def request_system_poweroff() -> Dict[str, Any]:
-    helper_path = "/usr/local/sbin/tb_ecu_poweroff"
+def request_system_power_action(action: str) -> Dict[str, Any]:
+    helper_path = f"/usr/local/sbin/tb_ecu_{action}"
     sudo_path = shutil.which("sudo")
     identity = {
         "uid": os.getuid(),
@@ -438,16 +438,28 @@ def request_system_poweroff() -> Dict[str, Any]:
             ["sudo", "-n", helper_path],
         ]
     else:
-        commands = [
-            ["sudo", "-n", "systemctl", "--no-block", "poweroff"],
-            ["sudo", "-n", "loginctl", "poweroff", "--no-wall"],
-            ["sudo", "-n", "shutdown", "-h", "now"],
-            ["sudo", "-n", "poweroff"],
-            ["systemctl", "--no-block", "poweroff"],
-            ["loginctl", "poweroff", "--no-wall"],
-            ["shutdown", "-h", "now"],
-            ["poweroff"],
-        ]
+        if action == "reboot":
+            commands = [
+                ["sudo", "-n", "systemctl", "--no-block", "reboot"],
+                ["sudo", "-n", "loginctl", "reboot", "--no-wall"],
+                ["sudo", "-n", "shutdown", "-r", "now"],
+                ["sudo", "-n", "reboot"],
+                ["systemctl", "--no-block", "reboot"],
+                ["loginctl", "reboot", "--no-wall"],
+                ["shutdown", "-r", "now"],
+                ["reboot"],
+            ]
+        else:
+            commands = [
+                ["sudo", "-n", "systemctl", "--no-block", "poweroff"],
+                ["sudo", "-n", "loginctl", "poweroff", "--no-wall"],
+                ["sudo", "-n", "shutdown", "-h", "now"],
+                ["sudo", "-n", "poweroff"],
+                ["systemctl", "--no-block", "poweroff"],
+                ["loginctl", "poweroff", "--no-wall"],
+                ["shutdown", "-h", "now"],
+                ["poweroff"],
+            ]
 
     attempts = []
     for command in commands:
@@ -497,8 +509,16 @@ def request_system_poweroff() -> Dict[str, Any]:
     return {"ok": False, "identity": identity, "attempts": attempts}
 
 
-def check_poweroff_permission() -> Dict[str, Any]:
-    helper_path = "/usr/local/sbin/tb_ecu_poweroff"
+def request_system_poweroff() -> Dict[str, Any]:
+    return request_system_power_action("poweroff")
+
+
+def request_system_reboot() -> Dict[str, Any]:
+    return request_system_power_action("reboot")
+
+
+def check_power_permission(action: str) -> Dict[str, Any]:
+    helper_path = f"/usr/local/sbin/tb_ecu_{action}"
     command = ["sudo", "-n", "-l", helper_path]
     executable = shutil.which(command[0])
     identity = {
@@ -527,6 +547,14 @@ def check_poweroff_permission() -> Dict[str, Any]:
         "stdout": result.stdout.strip(),
         "stderr": result.stderr.strip(),
     }
+
+
+def check_poweroff_permission() -> Dict[str, Any]:
+    return check_power_permission("poweroff")
+
+
+def check_reboot_permission() -> Dict[str, Any]:
+    return check_power_permission("reboot")
 
 
 # --------------------------------------------------------------------------- #
@@ -622,9 +650,24 @@ def api_shutdown() -> Dict[str, Any]:
     }
 
 
+@app.post("/api/reboot")
+def api_reboot() -> Dict[str, Any]:
+    reboot_result = request_system_reboot()
+    return {
+        "ok": reboot_result["ok"],
+        "mcu_command_sent": False,
+        "reboot": reboot_result,
+    }
+
+
 @app.get("/api/shutdown/check")
 def api_shutdown_check() -> Dict[str, Any]:
     return check_poweroff_permission()
+
+
+@app.get("/api/reboot/check")
+def api_reboot_check() -> Dict[str, Any]:
+    return check_reboot_permission()
 
 
 @app.websocket("/ws")

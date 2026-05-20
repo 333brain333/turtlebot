@@ -224,6 +224,21 @@ header {
 .danger-btn:hover { opacity: .88; }
 .danger-btn:active { transform: translateY(1px); }
 .danger-btn:disabled { opacity: .45; cursor: default; transform: none; }
+.warning-btn {
+  padding: 10px 16px;
+  background: #f97316;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity .2s, transform .1s;
+}
+.warning-btn:hover { opacity: .88; }
+.warning-btn:active { transform: translateY(1px); }
+.warning-btn:disabled { opacity: .45; cursor: default; transform: none; }
 .inline-note {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
@@ -524,6 +539,7 @@ header {
     <div class="card-title">Питание</div>
     <div class="status-actions">
       <button class="danger-btn" id="shutdownBtn" onclick="shutdownRobot()">Выключить turtlebot</button>
+      <button class="warning-btn" id="rebootBtn" onclick="rebootRobot()">Перезагрузить turtlebot</button>
       <span class="inline-note" id="shutdownStatus">готово</span>
     </div>
   </div>
@@ -785,28 +801,47 @@ async function refreshStatus() {
   }
 }
 
-async function shutdownRobot() {
-  if (!confirm('Выключить turtlebot?')) return;
-  const btn = document.getElementById('shutdownBtn');
+async function requestPowerAction(action) {
+  const isReboot = action === 'reboot';
+  if (!confirm(isReboot ? 'Перезагрузить turtlebot?' : 'Выключить turtlebot?')) return;
+  const btn = document.getElementById(isReboot ? 'rebootBtn' : 'shutdownBtn');
+  const otherBtn = document.getElementById(isReboot ? 'shutdownBtn' : 'rebootBtn');
   const status = document.getElementById('shutdownStatus');
   btn.disabled = true;
-  status.textContent = 'отправляю команду выключения...';
+  otherBtn.disabled = true;
+  status.textContent = isReboot
+    ? 'отправляю команду перезагрузки...'
+    : 'отправляю команду выключения...';
   try {
-    const resp = await fetch('/api/shutdown', { method: 'POST' });
+    const resp = await fetch(`/api/${action}`, { method: 'POST' });
     const data = await resp.json();
     if (!resp.ok || !data.ok) {
-      const attempts = data.poweroff?.attempts || [];
+      const result = data[isReboot ? 'reboot' : 'poweroff'];
+      const attempts = result?.attempts || [];
       const failed = attempts.find(attempt => !attempt.ok) || attempts[0] || {};
       const detail = failed.stderr || failed.error || `HTTP ${resp.status}`;
       throw new Error(detail);
     }
-    status.textContent = data.mcu_command_sent
-      ? 'команда отправлена, Jetson выключается'
-      : 'Jetson выключается, UART-команда не отправлена';
+    if (isReboot) {
+      status.textContent = 'Jetson перезагружается';
+    } else {
+      status.textContent = data.mcu_command_sent
+        ? 'команда отправлена, Jetson выключается'
+        : 'Jetson выключается, UART-команда не отправлена';
+    }
   } catch (err) {
     status.textContent = `ошибка: ${err.message}`;
     btn.disabled = false;
+    otherBtn.disabled = false;
   }
+}
+
+async function shutdownRobot() {
+  await requestPowerAction('shutdown');
+}
+
+async function rebootRobot() {
+  await requestPowerAction('reboot');
 }
 
 /* ═══════════════════════════ Camera ═════════════════════════════════════ */

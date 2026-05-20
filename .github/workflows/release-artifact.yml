@@ -31,7 +31,7 @@ jobs:
           cp -a src/ecu/music/. release/music/
           cp -a src/ecu/services/. release/services/
           cp -a src/ecu/config/. release/config/
-          cp -a src/ecu/main.py release/main.py
+          cp -a src/ecu/web_control_center.py release/web_control_center.py
           cp -a src/ecu/index.html release/index.html
           cp -a src/ecu/install.sh release/install.sh
           cp -a src/ecu/docker/. release/docker/
