@@ -1,6 +1,6 @@
 *.pyc
 .codex
 ws/*
-src/ecu/ws/build/
-src/ecu/ws/install/
-src/ecu/ws/log/
+src/ecu/ros2_ws/build/
+src/ecu/ros2_ws/install/
+src/ecu/ros2_ws/log/

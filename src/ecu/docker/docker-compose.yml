@@ -23,7 +23,7 @@ services:
 
     volumes:
       - /dev:/dev
-      - ../ws:/ros2_ws
+      - ../ros2_ws:/ros2_ws
 
     environment:
       ROS_DOMAIN_ID: "10"
@@ -31,4 +31,9 @@ services:
 
     restart: unless-stopped
 
-    command: sleep infinity
+    command: >
+      bash -lc "source /opt/ros/humble/setup.bash
+      && cd /ros2_ws
+      && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+      && source install/setup.bash
+      && ros2 launch robot_bringup robot_bringup.launch.py"

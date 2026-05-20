@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     net-tools \
     iproute2 \
     iputils-ping \
+    libudev-dev \
     python3-pip \
     python3-serial \
     python3-colcon-common-extensions \
@@ -37,10 +38,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-robot-state-publisher \
     && rm -rf /var/lib/apt/lists/*
 
-COPY ws/requirements.txt /tmp/ros2_requirements.txt
+COPY ros2_ws/requirements.txt /tmp/ros2_requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/ros2_requirements.txt
 
 RUN if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then rosdep init; fi
+
+COPY ros2_ws/src /tmp/ros2_ws_src
+RUN rosdep update || true \
+    && apt-get update \
+    && rosdep install --from-paths /tmp/ros2_ws_src --ignore-src -r -y --rosdistro ${ROS_DISTRO} \
+    && rm -rf /var/lib/apt/lists/*
 
 ARG USERNAME=agrodroid
 ARG USER_UID=1000
@@ -54,8 +61,6 @@ RUN echo "source /opt/ros/humble/setup.bash" >> /home/${USERNAME}/.bashrc
 RUN echo "[ -f /ros2_ws/install/setup.bash ] && source /ros2_ws/install/setup.bash" >> /home/${USERNAME}/.bashrc
 
 USER ${USERNAME}
-
-RUN rosdep update || true
 
 WORKDIR /ros2_ws
 
